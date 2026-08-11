@@ -81,7 +81,7 @@ def initialize_espn_league(league_id: int, year: int) -> League:
 
 
 def get_current_week() -> int:
-    season_start = datetime.datetime(2024, 9, 5, tzinfo=pytz.timezone("America/Chicago"))
+    season_start = datetime.datetime(2026, 9, 9, tzinfo=pytz.timezone("America/Chicago"))
     delta = get_current_central_datetime() - season_start
     return int(delta.days / 7) + 1
 
