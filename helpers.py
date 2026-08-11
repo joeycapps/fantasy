@@ -285,6 +285,7 @@ def update_all_scores(week: int = get_current_week()) -> dict:
                     player = {
                         'league_id': league_id,
                     'player_id': i,
+                    'headshot': f'https://sleepercdn.com/content/nfl/players/thumb/{i}.jpg',
                         'week': week,
                         'team_id': team.get('roster_id'),
                         'name': player_data.get('full_name', f"{player_data.get('last_name')} D/ST"),
