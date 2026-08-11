@@ -188,6 +188,7 @@ def update_all_scores(week: int = get_current_week()) -> dict:
             {"name": "play_status", "type": "STRING",   "mode": "REQUIRED"},
             {"name": "gametime",    "type": "DATETIME", "mode": "REQUIRED"},
             {"name": "updated",     "type": "DATETIME", "mode": "REQUIRED"},
+{"name": "player_id",   "type": "STRING",   "mode": "NULLABLE"},
         ],
         'matchups': [
             {"name": "league_id",   "type": "INTEGER",  "mode": "REQUIRED"},
@@ -283,6 +284,7 @@ def update_all_scores(week: int = get_current_week()) -> dict:
 
                     player = {
                         'league_id': league_id,
+                    'player_id': i,
                         'week': week,
                         'team_id': team.get('roster_id'),
                         'name': player_data.get('full_name', f"{player_data.get('last_name')} D/ST"),
@@ -715,10 +717,10 @@ def update_teams():
 
             rosters = {}
 
-            for roster in requests.get(f"https://api.sleeper.app/v1/league/{league.get('league_id')}/rosters").json():
+            for roster in requests.get(f"https://api.sleeper.app/v1/league/{league.get('league_id')}/rosters", timeout=15).json():
                 rosters[roster.get('owner_id')] = roster.get('roster_id')
             
-            for user in requests.get(f"https://api.sleeper.app/v1/league/{league.get('league_id')}/users").json():
+            for user in requests.get(f"https://api.sleeper.app/v1/league/{league.get('league_id')}/users", timeout=15).json():
                 if not rosters.get(user.get('user_id')):
                     continue
                 rows.append({

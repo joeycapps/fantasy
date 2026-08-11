@@ -1,71 +1,88 @@
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <title>fantasy</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fantasy Commander</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     <meta http-equiv="refresh" content="60">
 </head>
+
 <body>
-    <div class="matchups">
+    <header class="app-header">
+        <div>
+            <h1>Fantasy Commander</h1>
+            <p>Week {{ week }} · {{ matchups|length }} matchups</p>
+        </div>
+        <div class="header-actions">
+            <a href="?week={{ week - 1 }}">← Previous</a>
+            <a href="?week={{ week + 1 }}">Next →</a>
+            <a href="?week={{ week }}">Refresh</a>
+        </div>
+    </header>
+
+    <main class="matchups">
         {% for matchup in matchups %}
-        <div class="league">
-            <div class="matchup">
-                {% for team in matchup.values() %}
-                    {% set class = "odd" if loop.index0 % 2 == 1 else "even" %}
-                    <div class="team">
-                        <div class="team-header {{ class }}">
-                            {% if class == "even" %}
-                            <div class="team-chance">{{ team.players.win_chance }}</div>
-                            <div class="team-name">{{ team.owner.split()[0]|upper }}</div>
-                            <div class="team-projected {{ team.players.winning_projected }}">({{ team.players.projected }})</div>
-                            {% endif %}
-                            <div class="team-points {{ team.players.winning_points }}">{{ "%.02f"|format(team.players.points) }}</div>
-                            {% if class == "odd" %}
-                            <div class="team-projected {{ team.players.winning_projected }}">({{ team.players.projected }})</div>
-                            <div class="team-name">{{ team.owner.split()[0]|upper }}</div>
-                            <div class="team-chance">{{ team.players.win_chance }}</div>
-                            {% endif %}
+        <section class="matchup-card">
+            {% for team in matchup.values() %}
+                {% set class = "odd" if loop.index0 % 2 == 1 else "even" %}
+
+                <div class="team {{ class }}">
+                    <div class="team-header">
+                        <div class="team-chance">
+                            {{ team.players.win_chance }}
                         </div>
-                        <div class="players {{ class }}">
-                        {% for player in team.players.show %}
-                        {% if class == "even" %}
-                            <div class="player {{ class }} {{ player.play_status }} {{ player.status|lower }}">
-                                <div class="name">{{ player.name }}</div>
-                                {% if player.projected != -1 %}
-                                    <div class="projected">{% if player.projected < 10 %}&nbsp;{% endif %}({{ "%.02f"|format(player.projected) }})</div>
-                                {% else %}
-                                    <div class="projected"></div>
-                                {% endif %}
-                                {% if player.points != player.display %}
-                                    <div class="display">{{ player.display }}</div>
-                                {% else %}
-                                    <div class="points">{% if player.points < 10 %}&nbsp;{% endif %}{{ "%.02f"|format(player.points) }}</div>
-                                {% endif %}
-                            </div>
-                        {% else %}
-                            <div class="player {{ class }} {{ player.play_status }} {{ player.status|lower }}">
-                                {% if player.points != player.display %}
-                                    <div class="display">{{ player.display }}</div>
-                                {% else %}
-                                    <div class="points">{% if player.points < 10 %}&nbsp;{% endif %}{{ "%.02f"|format(player.points) }}</div>
-                                {% endif %}
-                                {% if player.projected != -1 %}
-                                    <div class="projected">{% if player.projected < 10 %}&nbsp;{% endif %}({{ "%.02f"|format(player.projected) }})</div>
-                                {% else %}
-                                    <div class="projected"></div>
-                                {% endif %}
-                                <div class="name">{{ player.name }}</div>
-                            </div>
-                        {% endif %}
-                        {% endfor %}
+
+                        <div class="team-name">
+                            {{ team.owner.split()[0]|upper }}
+                        </div>
+
+                        <div class="team-score">
+                            {{ "%.02f"|format(team.players.points) }}
+                        </div>
+
+                        <div class="team-projected">
+                            Projected {{ "%.02f"|format(team.players.projected) }}
                         </div>
                     </div>
-                    {% if loop.first %}
-                        <div class="team"></div>
-                    {% endif %}
-                {% endfor %}
-            </div>
-        </div>
+
+                    <div class="players">
+                        {% for player in team.players.show %}
+                        <div class="player {{ player.play_status }} {{ player.status|lower }}">
+                            <div class="position">
+                                —
+                            </div>
+
+                            <div class="name">
+                                {{ player.name }}
+                            </div>
+
+                            <div class="player-projected">
+                                {% if player.projected != -1 %}
+                                    {{ "%.02f"|format(player.projected) }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </div>
+
+                            <div class="player-points">
+                                {% if player.points != player.display %}
+                                    {{ player.display }}
+                                {% else %}
+                                    {{ "%.02f"|format(player.points) }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                {% if loop.first %}
+                    <div class="vs">VS</div>
+                {% endif %}
+            {% endfor %}
+        </section>
         {% endfor %}
-    </div>
+    </main>
 </body>
 </html>

@@ -315,3 +315,313 @@ div.team-projected.winning {
 div.team-points.winning {
     color: lawngreen;
 }
+/* Fantasy Commander modern UI */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #0b1020;
+    color: #f5f7fb;
+    font-family: Inter, Arial, sans-serif;
+}
+
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    padding: 18px 24px;
+    background: #11182b;
+    border-bottom: 1px solid #27314a;
+    box-shadow: 0 4px 20px rgba(0,0,0,.3);
+}
+
+.app-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.app-header p {
+    margin: 5px 0 0;
+    color: #9da9c3;
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.header-actions a {
+    background: #263352;
+    color: white;
+    padding: 9px 14px;
+    border: 1px solid #3a496c;
+    border-radius: 8px;
+}
+
+.header-actions a:hover {
+    background: #36528a;
+}
+
+.matchups {
+    width: min(1100px, 96%);
+    margin: 24px auto;
+}
+
+.matchup-card {
+    display: grid;
+    grid-template-columns: 1fr 70px 1fr;
+    align-items: start;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 16px;
+    background: #11182b;
+    border: 1px solid #27314a;
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.2);
+}
+
+.team {
+    min-width: 0;
+}
+
+.team-header {
+    display: grid;
+    grid-template-columns: 70px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #19233b;
+    border-radius: 10px;
+    margin-bottom: 8px;
+}
+
+.team-name {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+    color: #ffffff;
+    font-size: 1rem;
+}
+
+.team-score {
+    font-size: 1.3rem;
+    font-weight: 800;
+    text-align: right;
+}
+
+.team-projected {
+    grid-column: 2 / 4;
+    color: #8f9bb5;
+    font-size: .8rem;
+    padding-bottom: 4px;
+}
+
+.team-chance {
+    color: #6ee7b7;
+    font-size: .8rem;
+}
+
+.players {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.player {
+    display: grid;
+    grid-template-columns: 35px 1fr 65px 60px;
+    align-items: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 6px 9px;
+    border: 1px solid #202b44;
+    border-radius: 8px;
+    background: #151e33;
+}
+
+.player:hover {
+    background: #1d2943;
+}
+
+.position {
+    color: #71809e;
+    font-size: .72rem;
+    text-align: center;
+}
+
+.player .name {
+    color: #eef2f8;
+    font-weight: 600;
+}
+
+.player-projected {
+    color: #8f9bb5;
+    text-align: right;
+    font-size: .85rem;
+}
+
+.player-points {
+    color: #ffffff;
+    text-align: right;
+    font-weight: 700;
+}
+
+.vs {
+    align-self: center;
+    justify-self: center;
+    padding: 9px 10px;
+    border-radius: 50%;
+    background: #263352;
+    color: #aeb9d0;
+    font-weight: 800;
+    font-size: .75rem;
+}
+
+@media (max-width: 800px) {
+    .app-header {
+        position: static;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .header-actions {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .header-actions a {
+        padding: 10px 5px;
+        font-size: .8rem;
+    }
+
+    .matchup-card {
+        grid-template-columns: 1fr;
+        padding: 10px;
+    }
+
+    .vs {
+        margin: -2px auto;
+    }
+}
+
+/* Fantasy Commander visual refresh */
+
+body {
+    background: #0b0f14;
+    color: #f4f7fb;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app-header {
+    background: #111821;
+    border-bottom: 1px solid #263241;
+    padding: 18px 24px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
+}
+
+.app-header h1 {
+    color: #ffffff;
+    font-family: Inter, system-ui, sans-serif;
+}
+
+.app-header p {
+    color: #8e9aaa;
+}
+
+.header-actions a {
+    background: #18212d;
+    border: 1px solid #2b3949;
+    color: #ffffff;
+    border-radius: 9px;
+    padding: 9px 13px;
+}
+
+.header-actions a:hover {
+    background: #243246;
+    border-color: #39d98a;
+}
+
+.matchups {
+    width: min(1400px, calc(100% - 32px));
+    margin: 24px auto 60px;
+}
+
+.matchup-card {
+    background: linear-gradient(145deg, #121a24, #0e141c);
+    border: 1px solid #263241;
+    border-radius: 18px;
+    padding: 18px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.28);
+}
+
+.team-header {
+    background: #18212d;
+    border: 1px solid #2b3949;
+    border-radius: 13px;
+}
+
+.team-name {
+    color: #ffffff;
+}
+
+.team-score {
+    color: #39d98a;
+}
+
+.team-projected {
+    color: #8e9aaa;
+}
+
+.player {
+    background: #101720;
+    border: 1px solid #202b38;
+    border-radius: 10px;
+    transition: .15s ease;
+}
+
+.player:hover {
+    background: #18222e;
+    border-color: #344457;
+    transform: translateY(-1px);
+}
+
+.position {
+    background: #202b38;
+    color: #8e9aaa;
+    border-radius: 6px;
+}
+
+.player-projected {
+    color: #8e9aaa;
+}
+
+.player.playing {
+    border-left: 3px solid #39d98a;
+}
+
+.player.today {
+    border-left: 3px solid #f5c451;
+}
+
+.player.future {
+    border-left: 3px solid #5aa9ff;
+}
+
+.player.bye {
+    opacity: .5;
+}
+
+.vs {
+    background: #202a36;
+    border: 1px solid #344457;
+    color: #8e9aaa;
+}
