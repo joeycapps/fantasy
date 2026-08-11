@@ -189,6 +189,7 @@ def update_all_scores(week: int = get_current_week()) -> dict:
             {"name": "gametime",    "type": "DATETIME", "mode": "REQUIRED"},
             {"name": "updated",     "type": "DATETIME", "mode": "REQUIRED"},
 {"name": "player_id",   "type": "STRING",   "mode": "NULLABLE"},
+            {"name": "headshot",    "type": "STRING",   "mode": "NULLABLE"},
         ],
         'matchups': [
             {"name": "league_id",   "type": "INTEGER",  "mode": "REQUIRED"},

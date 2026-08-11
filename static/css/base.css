@@ -625,3 +625,12 @@ body {
     border: 1px solid #344457;
     color: #8e9aaa;
 }
+
+.player-headshot {
+    width: 28px;
+    height: 28px;
+    object-fit: cover;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 6px;
+}

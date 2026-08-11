@@ -54,6 +54,9 @@
                             </div>
 
                             <div class="name">
+                                {% if player.headshot %}
+                                    <img class="player-headshot" src="{{ player.headshot }}" alt="{{ player.name }}">
+                                {% endif %}
                                 {{ player.name }}
                             </div>
 
