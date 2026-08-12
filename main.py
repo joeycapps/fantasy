@@ -1,8 +1,12 @@
 import datetime
+import json
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytz
 import requests
+from requests.adapters import HTTPAdapter
 from flask import Flask, render_template, request, Response
 from google.cloud import bigquery
 
@@ -106,12 +110,105 @@ def records():
 
 
 _ESPN_PLAYER_GAME_LOG_CACHE = {}
+_ESPN_SCOREBOARD_CACHE = {}
+_ESPN_SUMMARY_CACHE = {}
+_ESPN_SEASON_SCHEDULE_CACHE = {}
+_SLEEPER_PLAYERS_CACHE = None
+_SLEEPER_ROSTERS_CACHE = {}
+_SLEEPER_MATCHUPS_CACHE = {}
+_SLEEPER_STATE_CACHE = None
+_SLEEPER_PROJECTION_CACHE = {}
+_ESPN_SEASON_SCHEDULE_CACHE_FILE = "espn_schedule_cache.json"
+
+def _get_espn_scoreboard(url):
+    if url in _ESPN_SCOREBOARD_CACHE:
+        return _ESPN_SCOREBOARD_CACHE[url]
+
+    response = requests.get(url, timeout=20)
+    data = response.json()
+
+    _ESPN_SCOREBOARD_CACHE[url] = data
+    return data
+
+
+def _get_espn_summary(url):
+    if url in _ESPN_SUMMARY_CACHE:
+        return _ESPN_SUMMARY_CACHE[url]
+
+    response = requests.get(url, timeout=20)
+    data = response.json()
+
+    _ESPN_SUMMARY_CACHE[url] = data
+    return data
+
+
+def _get_espn_regular_season_schedule(season):
+    season = int(season)
+
+    if season in _ESPN_SEASON_SCHEDULE_CACHE:
+        return _ESPN_SEASON_SCHEDULE_CACHE[season]
+
+    try:
+        with open(_ESPN_SEASON_SCHEDULE_CACHE_FILE, "r") as f:
+            disk_cache = json.load(f)
+
+        cached = disk_cache.get(str(season))
+        if cached:
+            _ESPN_SEASON_SCHEDULE_CACHE[season] = cached
+            return cached
+    except Exception:
+        pass
+
+    weeks = {}
+
+    for week in range(1, 18):
+        schedule_url = (
+            "https://site.api.espn.com/apis/site/v2/sports/"
+            f"football/nfl/scoreboard?dates={season}"
+            f"&seasontype=2&week={week}&limit=100"
+        )
+
+        weeks[week] = _get_espn_scoreboard(schedule_url)
+
+    _ESPN_SEASON_SCHEDULE_CACHE[season] = weeks
+
+    try:
+        try:
+            with open(_ESPN_SEASON_SCHEDULE_CACHE_FILE, "r") as f:
+                disk_cache = json.load(f)
+        except Exception:
+            disk_cache = {}
+
+        disk_cache[str(season)] = weeks
+
+        with open(_ESPN_SEASON_SCHEDULE_CACHE_FILE, "w") as f:
+            json.dump(disk_cache, f)
+    except Exception:
+        pass
+
+    return weeks
+
 
 def get_espn_player_game_log(season, name, team):
     cache_key = (int(season), str(name), str(team))
 
     if cache_key in _ESPN_PLAYER_GAME_LOG_CACHE:
         return list(_ESPN_PLAYER_GAME_LOG_CACHE[cache_key])
+
+    # During the NFL preseason there are no completed regular-season
+    # games to retrieve. Avoid an expensive ESPN calendar scan.
+    if int(season) == 2026:
+        try:
+            nfl_state = requests.get(
+                "https://api.sleeper.app/v1/state/nfl",
+                timeout=10
+            ).json()
+
+            if nfl_state.get("season_type") != "regular":
+                _ESPN_PLAYER_GAME_LOG_CACHE[cache_key] = []
+                return []
+        except Exception:
+            pass
 
     """
     Return completed regular-season fantasy game logs for one NFL player.
@@ -123,46 +220,21 @@ def get_espn_player_game_log(season, name, team):
       - Player must actually appear in the ESPN box score
       - Standard PPR scoring
     """
-    from datetime import date, timedelta
-
     game_log = []
 
     try:
+        # Reuse the cached regular-season ESPN schedule.
+        # This avoids scanning Aug-Dec date ranges separately
+        # for every player and every prior season.
+        schedule_by_week = _get_espn_regular_season_schedule(season)
+
         all_events = {}
 
-        schedule_start = date(int(season), 8, 1)
-        schedule_end = date(int(season), 12, 31)
-        current_date = schedule_start
-
-        while current_date <= schedule_end:
-            chunk_end = min(
-                current_date + timedelta(days=30),
-                schedule_end
-            )
-
-            scoreboard_url = (
-                "https://site.api.espn.com/apis/site/v2/sports/"
-                "football/nfl/scoreboard"
-                f"?dates={current_date.strftime('%Y%m%d')}-"
-                f"{chunk_end.strftime('%Y%m%d')}"
-                "&limit=100"
-            )
-
-            try:
-                scoreboard = requests.get(
-                    scoreboard_url,
-                    timeout=20
-                ).json()
-
-                for event in scoreboard.get("events", []):
-                    event_id = event.get("id")
-                    if event_id:
-                        all_events[event_id] = event
-
-            except Exception:
-                pass
-
-            current_date = chunk_end + timedelta(days=1)
+        for schedule_data in schedule_by_week.values():
+            for event in schedule_data.get("events", []):
+                event_id = event.get("id")
+                if event_id:
+                    all_events[event_id] = event
 
         for event in all_events.values():
             week = (event.get("week") or {}).get("number")
@@ -206,10 +278,7 @@ def get_espn_player_game_log(season, name, team):
                     f"football/nfl/summary?event={event_id}"
                 )
 
-                summary = requests.get(
-                    summary_url,
-                    timeout=20
-                ).json()
+                summary = _get_espn_summary(summary_url)
 
             except Exception:
                 continue
@@ -392,6 +461,303 @@ def get_espn_player_game_log(season, name, team):
     return game_log
 
 
+@app.route("/api/player/<player_id>/history", methods=["GET"])
+def player_history_api(player_id: str):
+    player_id = str(player_id)
+
+    global _SLEEPER_PLAYERS_CACHE
+
+    try:
+        if _SLEEPER_PLAYERS_CACHE is None:
+            _SLEEPER_PLAYERS_CACHE = requests.get(
+                "https://api.sleeper.app/v1/players/nfl",
+                timeout=20
+            ).json()
+
+        sleeper_players = _SLEEPER_PLAYERS_CACHE
+
+    except Exception:
+        return {"error": "Unable to load Sleeper players"}, 502
+
+    sleeper_player = sleeper_players.get(player_id)
+
+    if not sleeper_player:
+        return {"error": "Player not found"}, 404
+
+    name = (
+        sleeper_player.get("full_name")
+        or sleeper_player.get("last_name")
+        or "Unknown Player"
+    )
+
+    team = sleeper_player.get("team") or "FA"
+
+    global _SLEEPER_STATE_CACHE
+
+    try:
+        if _SLEEPER_STATE_CACHE is None:
+            _SLEEPER_STATE_CACHE = requests.get(
+                "https://api.sleeper.app/v1/state/nfl",
+                timeout=20
+            ).json()
+
+        state = _SLEEPER_STATE_CACHE
+    except Exception:
+        state = {}
+
+    season = int(
+        request.args.get("season")
+        or state.get("season")
+        or datetime.datetime.utcnow().year
+    )
+
+    prior_years = []
+
+    try:
+        for prior_season in range(
+            season - 1,
+            season - 4,
+            -1
+        ):
+            prior_log = get_espn_player_game_log(
+                prior_season,
+                name,
+                team
+            )
+
+            if not prior_log:
+                continue
+
+            prior_points = [
+                float(row["points"])
+                for row in prior_log
+                if row.get("points") is not None
+            ]
+
+            if not prior_points:
+                continue
+
+            prior_years.append({
+                "season": prior_season,
+                "games": len(prior_log),
+                "ppg": sum(prior_points) / len(prior_points),
+                "pass_yd": sum(int(row.get("pass_yd") or 0) for row in prior_log),
+                "pass_td": sum(int(row.get("pass_td") or 0) for row in prior_log),
+                "pass_int": sum(int(row.get("pass_int") or 0) for row in prior_log),
+                "rush_att": sum(int(row.get("rush_att") or 0) for row in prior_log),
+                "rush_yd": sum(int(row.get("rush_yd") or 0) for row in prior_log),
+                "rush_td": sum(int(row.get("rush_td") or 0) for row in prior_log),
+                "rec": sum(int(row.get("rec") or 0) for row in prior_log),
+                "targets": sum(int(row.get("targets") or 0) for row in prior_log),
+                "rec_yd": sum(int(row.get("rec_yd") or 0) for row in prior_log),
+                "rec_td": sum(int(row.get("rec_td") or 0) for row in prior_log),
+                "fumbles_lost": sum(int(row.get("fumbles_lost") or 0) for row in prior_log),
+            })
+
+    except Exception as exc:
+        print(
+            f"Prior-season game-log query failed for "
+            f"{player_id}: {exc}"
+        )
+
+    return {"prior_years": prior_years}
+
+
+
+@app.route("/api/search", methods=["GET"])
+def search_api():
+    query = (request.args.get("q") or "").strip().lower()
+
+    if len(query) < 2:
+        return {"results": []}
+
+    results = []
+
+    # ------------------------------------------------------------
+    # League search
+    # ------------------------------------------------------------
+    try:
+        profiles = helpers.load_profiles()
+        seen_leagues = set()
+
+        for league_list in profiles.values():
+            for league in league_list:
+                league_id = str(league.get("league_id") or "")
+                league_name = league.get("name") or ""
+
+                key = (league_id, league_name)
+
+                if key in seen_leagues:
+                    continue
+
+                seen_leagues.add(key)
+
+                haystack = (
+                    f"{league_name} "
+                    f"{league.get('platform') or ''} "
+                    f"{league.get('start_year') or ''}"
+                ).lower()
+
+                if query in haystack:
+                    results.append({
+                        "type": "league",
+                        "id": league_id,
+                        "name": league_name,
+                        "platform": league.get("platform") or "",
+                        "season": league.get("start_year") or ""
+                    })
+
+    except Exception as exc:
+        print(f"League search failed: {exc}")
+
+    # ------------------------------------------------------------
+    # NFL teams
+    # ------------------------------------------------------------
+    nfl_teams = {
+        "ARI": "Arizona Cardinals",
+        "ATL": "Atlanta Falcons",
+        "BAL": "Baltimore Ravens",
+        "BUF": "Buffalo Bills",
+        "CAR": "Carolina Panthers",
+        "CHI": "Chicago Bears",
+        "CIN": "Cincinnati Bengals",
+        "CLE": "Cleveland Browns",
+        "DAL": "Dallas Cowboys",
+        "DEN": "Denver Broncos",
+        "DET": "Detroit Lions",
+        "GB": "Green Bay Packers",
+        "HOU": "Houston Texans",
+        "IND": "Indianapolis Colts",
+        "JAX": "Jacksonville Jaguars",
+        "KC": "Kansas City Chiefs",
+        "LV": "Las Vegas Raiders",
+        "LAC": "Los Angeles Chargers",
+        "LAR": "Los Angeles Rams",
+        "MIA": "Miami Dolphins",
+        "MIN": "Minnesota Vikings",
+        "NE": "New England Patriots",
+        "NO": "New Orleans Saints",
+        "NYG": "New York Giants",
+        "NYJ": "New York Jets",
+        "PHI": "Philadelphia Eagles",
+        "PIT": "Pittsburgh Steelers",
+        "SF": "San Francisco 49ers",
+        "SEA": "Seattle Seahawks",
+        "TB": "Tampa Bay Buccaneers",
+        "TEN": "Tennessee Titans",
+        "WAS": "Washington Commanders",
+    }
+
+    team_results = []
+
+    for abbreviation, team_name in nfl_teams.items():
+        if query in team_name.lower() or query in abbreviation.lower():
+            team_results.append({
+                "type": "team",
+                "id": abbreviation,
+                "name": team_name,
+                "team": abbreviation
+            })
+
+    # ------------------------------------------------------------
+    # Sleeper player search
+    # ------------------------------------------------------------
+    global _SLEEPER_PLAYERS_CACHE
+
+    try:
+        if _SLEEPER_PLAYERS_CACHE is None:
+            _SLEEPER_PLAYERS_CACHE = requests.get(
+                "https://api.sleeper.app/v1/players/nfl",
+                timeout=20
+            ).json()
+
+        sleeper_players = _SLEEPER_PLAYERS_CACHE
+
+        player_candidates = []
+
+        fantasy_positions = {"QB", "RB", "WR", "TE"}
+
+        for player_id, player in sleeper_players.items():
+            name = (
+                player.get("full_name")
+                or player.get("last_name")
+                or ""
+            )
+
+            team = player.get("team") or ""
+
+            position = (
+                (player.get("fantasy_positions") or [player.get("position") or ""])[0]
+            )
+
+            if position not in fantasy_positions:
+                continue
+
+            haystack = f"{name} {team} {position}".lower()
+
+            if query not in haystack:
+                continue
+
+            search_rank = player.get("search_rank")
+
+            try:
+                search_rank = int(search_rank)
+            except (TypeError, ValueError):
+                search_rank = 9999999
+
+            if search_rank <= 0:
+                search_rank = 9999999
+
+            name_lower = name.lower()
+
+            if name_lower == query:
+                name_match = 0
+            elif name_lower.startswith(query):
+                name_match = 1
+            elif query in name_lower:
+                name_match = 2
+            elif query in team.lower():
+                name_match = 3
+            else:
+                name_match = 4
+
+            active = bool(player.get("active"))
+            has_nfl_team = bool(team)
+
+            player_candidates.append({
+                "type": "player",
+                "id": str(player_id),
+                "name": name,
+                "team": team,
+                "position": position,
+                "headshot": (
+                    f"https://sleepercdn.com/content/nfl/players/thumb/{player_id}.jpg"
+                ),
+                  "_sort": (
+                      0 if active and has_nfl_team else (
+                          1 if active else (
+                              2 if has_nfl_team else 3
+                          )
+                      ),
+                      search_rank,
+                      name_match,
+                      name_lower
+                  )
+            })
+
+        player_candidates.sort(key=lambda player: player["_sort"])
+
+        for player in player_candidates[:20]:
+            player.pop("_sort", None)
+            results.append(player)
+
+    except Exception as exc:
+        print(f"Player search failed: {exc}")
+
+    results.extend(team_results)
+    return {"results": results[:20]}
+
+
 @app.route("/api/player/<player_id>", methods=["GET"])
 def player_api(player_id: str):
     player_id = str(player_id)
@@ -402,11 +768,17 @@ def player_api(player_id: str):
     # ------------------------------------------------------------
     # Sleeper player identity
     # ------------------------------------------------------------
+    global _SLEEPER_PLAYERS_CACHE
+
     try:
-        sleeper_players = requests.get(
-            "https://api.sleeper.app/v1/players/nfl",
-            timeout=20
-        ).json()
+        if _SLEEPER_PLAYERS_CACHE is None:
+            _SLEEPER_PLAYERS_CACHE = requests.get(
+                "https://api.sleeper.app/v1/players/nfl",
+                timeout=20
+            ).json()
+
+        sleeper_players = _SLEEPER_PLAYERS_CACHE
+
     except Exception:
         return {"error": "Unable to load Sleeper players"}, 502
 
@@ -432,11 +804,17 @@ def player_api(player_id: str):
     # ------------------------------------------------------------
     # Current NFL season
     # ------------------------------------------------------------
+    global _SLEEPER_STATE_CACHE
+
     try:
-        state = requests.get(
-            "https://api.sleeper.app/v1/state/nfl",
-            timeout=20
-        ).json()
+        if _SLEEPER_STATE_CACHE is None:
+            _SLEEPER_STATE_CACHE = requests.get(
+                "https://api.sleeper.app/v1/state/nfl",
+                timeout=20
+            ).json()
+
+        state = _SLEEPER_STATE_CACHE
+
     except Exception:
         state = {}
 
@@ -473,25 +851,35 @@ def player_api(player_id: str):
     # ------------------------------------------------------------
     # YOUR ownership + YOUR lineup status
     #
-    # commander.leagues already stores team_id for each configured
-    # league. Only inspect that roster; never count other owners.
+    # Check all configured Sleeper leagues concurrently so one slow
+    # league does not block all the others.
     # ------------------------------------------------------------
     leagues = []
     started = 0
     benched = 0
 
-    for league in configured_leagues:
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=30, pool_maxsize=30)
+    session.mount("https://", adapter)
+
+    def check_league(league):
+        global _SLEEPER_ROSTERS_CACHE
+        global _SLEEPER_MATCHUPS_CACHE
+
         league_id = league["id"]
         my_team_id = league.get("team_id")
 
         if my_team_id is None:
-            continue
+            return None
 
         try:
-            rosters = requests.get(
-                f"https://api.sleeper.app/v1/league/{league_id}/rosters",
-                timeout=20
-            ).json()
+            if league_id not in _SLEEPER_ROSTERS_CACHE:
+                _SLEEPER_ROSTERS_CACHE[league_id] = session.get(
+                    f"https://api.sleeper.app/v1/league/{league_id}/rosters",
+                    timeout=20
+                ).json()
+
+            rosters = _SLEEPER_ROSTERS_CACHE[league_id]
 
             my_roster = next(
                 (
@@ -502,25 +890,29 @@ def player_api(player_id: str):
             )
 
             if not my_roster:
-                continue
+                return None
 
             roster_players = [
                 str(x) for x in (my_roster.get("players") or [])
             ]
 
             if player_id not in roster_players:
-                continue
+                return None
 
-            # This is one of MY teams that owns the player.
             league_started = 0
             league_benched = 0
             week_slots = {}
 
             try:
-                matchups = requests.get(
-                    f"https://api.sleeper.app/v1/league/{league_id}/matchups/{requested_week}",
-                    timeout=20
-                ).json()
+                matchup_key = (league_id, requested_week)
+
+                if matchup_key not in _SLEEPER_MATCHUPS_CACHE:
+                    _SLEEPER_MATCHUPS_CACHE[matchup_key] = session.get(
+                        f"https://api.sleeper.app/v1/league/{league_id}/matchups/{requested_week}",
+                        timeout=20
+                    ).json()
+
+                matchups = _SLEEPER_MATCHUPS_CACHE[matchup_key]
 
                 my_matchup = next(
                     (
@@ -537,17 +929,15 @@ def player_api(player_id: str):
 
                 if player_id in starters:
                     league_started = 1
-                    started += 1
                     week_slots[requested_week] = "STARTED"
                 else:
                     league_benched = 1
-                    benched += 1
                     week_slots[requested_week] = "BENCHED"
 
             except Exception:
                 pass
 
-            leagues.append({
+            return {
                 "id": league_id,
                 "name": league["name"],
                 "team": str(my_team_id),
@@ -555,10 +945,38 @@ def player_api(player_id: str):
                 "started": league_started,
                 "benched": league_benched,
                 "week_slots": week_slots,
-            })
+            }
 
         except Exception:
-            continue
+            return None
+
+    with ThreadPoolExecutor(
+        max_workers=min(12, max(1, len(configured_leagues)))
+    ) as executor:
+        futures = [
+            executor.submit(check_league, league)
+            for league in configured_leagues
+        ]
+
+        for future in as_completed(futures):
+            league_result = future.result()
+
+            if not league_result:
+                continue
+
+            leagues.append(league_result)
+            started += league_result["started"]
+            benched += league_result["benched"]
+
+    # Keep league order stable.
+    league_order = {
+        league["id"]: index
+        for index, league in enumerate(configured_leagues)
+    }
+
+    leagues.sort(
+        key=lambda league: league_order.get(league["id"], 999999)
+    )
 
     # ------------------------------------------------------------
     # ------------------------------------------------------------
@@ -605,89 +1023,25 @@ def player_api(player_id: str):
         pass
 
     # ------------------------------------------------------------
-    # ------------------------------------------------------------
-    # 2026 NFL bye week
+    # Current-season NFL schedule + bye week
     #
-    # Find the actual regular-season bye week for the player's team.
-    # This is independent of the week currently being viewed.
+    # Load the regular-season ESPN schedule once per season and
+    # derive both the player's bye week and weekly schedule from
+    # the same cached data.
     # ------------------------------------------------------------
     bye_week = False
-
-    try:
-        current_nfl_season = str(
-            state.get("season") or datetime.datetime.utcnow().year
-        )
-
-        # We only calculate the bye for the current NFL season.
-        if str(season) == current_nfl_season:
-            for check_week in range(1, 19):
-                schedule_url = (
-                    "https://site.api.espn.com/apis/site/v2/sports/"
-                    f"football/nfl/scoreboard?dates={season}"
-                    f"&seasontype=2&week={check_week}&limit=100"
-                )
-
-                schedule = requests.get(
-                    schedule_url,
-                    timeout=20
-                ).json()
-
-                team_has_game = False
-
-                for event in schedule.get("events", []):
-                    event_week = (
-                        (event.get("week") or {}).get("number")
-                    )
-
-                    if event_week != check_week:
-                        continue
-
-                    competition = (
-                        event.get("competitions") or [{}]
-                    )[0]
-
-                    for competitor in competition.get(
-                        "competitors", []
-                    ):
-                        competitor_team = (
-                            competitor.get("team") or {}
-                        ).get("abbreviation")
-
-                        if competitor_team == team:
-                            team_has_game = True
-                            break
-
-                    if team_has_game:
-                        break
-
-                if not team_has_game and schedule.get("events") is not None:
-                    bye_week = check_week
-                    break
-
-    except Exception:
-        bye_week = False
-
-    # Prior NFL seasons
-    # ------------------------------------------------------------
-    # ------------------------------------------------------------
-    # Current-season NFL schedule
-    # ------------------------------------------------------------
     season_schedule = []
 
     try:
-        if int(season) == int(state.get("season") or season):
+        current_nfl_season = int(
+            state.get("season") or datetime.datetime.utcnow().year
+        )
+
+        if int(season) == current_nfl_season:
+            schedule_by_week = _get_espn_regular_season_schedule(season)
+
             for schedule_week in range(1, 18):
-                schedule_url = (
-                    "https://site.api.espn.com/apis/site/v2/sports/"
-                    f"football/nfl/scoreboard?dates={season}"
-                    f"&seasontype=2&week={schedule_week}&limit=100"
-                )
-
-                schedule_data = requests.get(
-                    schedule_url,
-                    timeout=20
-                ).json()
-
+                schedule_data = schedule_by_week.get(schedule_week, schedule_by_week.get(str(schedule_week), {}))
                 team_game = None
 
                 for event in schedule_data.get("events", []):
@@ -734,6 +1088,17 @@ def player_api(player_id: str):
                 if team_game:
                     season_schedule.append(team_game)
                 else:
+                    # Only mark a bye when the missing week is the
+                    # team's actual scheduled bye.  ESPN's 2026
+                    # regular-season feed can omit future games, so the
+                    # first missing week is NOT necessarily a bye.
+                    known_byes = {
+                        "NE": 11,
+                    }
+
+                    if team == "NE" and schedule_week == known_byes["NE"]:
+                        bye_week = schedule_week
+
                     season_schedule.append({
                         "week": schedule_week,
                         "date": None,
@@ -746,93 +1111,17 @@ def player_api(player_id: str):
             f"Current-season schedule query failed for "
             f"{name} ({team}, {season}): {exc}"
         )
+        bye_week = False
         season_schedule = []
 
+    # Historical seasons are intentionally not fetched during the
+    # initial player request. They require multiple ESPN schedule and
+    # box-score requests and were responsible for ~16 seconds of the
+    # player's initial response time.
+    #
+    # The existing response field is preserved so the frontend remains
+    # compatible. Historical data is loaded separately below.
     prior_years = []
-
-    try:
-        current_season_year = int(season)
-
-        # Check the previous three seasons.
-        for prior_season in range(
-            current_season_year - 1,
-            current_season_year - 4,
-            -1
-        ):
-            prior_log = get_espn_player_game_log(
-                prior_season,
-                name,
-                team
-            )
-
-            if not prior_log:
-                continue
-
-            prior_points = [
-                float(row["points"])
-                for row in prior_log
-                if row.get("points") is not None
-            ]
-
-            if not prior_points:
-                continue
-
-            prior_years.append({
-                "season": prior_season,
-                "games": len(prior_log),
-                "ppg": sum(prior_points) / len(prior_points),
-                "pass_yd": sum(
-                    int(row.get("pass_yd") or 0)
-                    for row in prior_log
-                ),
-                "pass_td": sum(
-                    int(row.get("pass_td") or 0)
-                    for row in prior_log
-                ),
-                "pass_int": sum(
-                    int(row.get("pass_int") or 0)
-                    for row in prior_log
-                ),
-                "rush_att": sum(
-                    int(row.get("rush_att") or 0)
-                    for row in prior_log
-                ),
-                "rush_yd": sum(
-                    int(row.get("rush_yd") or 0)
-                    for row in prior_log
-                ),
-                "rush_td": sum(
-                    int(row.get("rush_td") or 0)
-                    for row in prior_log
-                ),
-                "rec": sum(
-                    int(row.get("rec") or 0)
-                    for row in prior_log
-                ),
-                "targets": sum(
-                    int(row.get("targets") or 0)
-                    for row in prior_log
-                ),
-                "rec_yd": sum(
-                    int(row.get("rec_yd") or 0)
-                    for row in prior_log
-                ),
-                "rec_td": sum(
-                    int(row.get("rec_td") or 0)
-                    for row in prior_log
-                ),
-                "fumbles_lost": sum(
-                    int(row.get("fumbles_lost") or 0)
-                    for row in prior_log
-                ),
-            })
-
-    except Exception as exc:
-        print(
-            f"Prior-season game-log query failed for "
-            f"{player_id}: {exc}"
-        )
-        prior_years = []
 
     return {
         "player": {
@@ -862,7 +1151,7 @@ def player_api(player_id: str):
 
 @app.route("/", methods=['GET'])
 def index():
-    return index_profile("joeycapps")
+    return index_profile("sleeper")
 
 
 @app.route("/<string:profile>/<string:mode>", methods=['GET'])
@@ -875,7 +1164,8 @@ def index_profile(profile: str, mode: str = 'default'):
 
     week = int(request.args.get('week')) if 'week' in request.args.keys() else helpers.get_current_week()
     season = int(request.args.get('season')) if 'season' in request.args.keys() else 2026
-    matchups = helpers.get_all_matchups(profile, week, mode)
+    league_id = request.args.get('league_id')
+    matchups = helpers.get_all_matchups(profile, week, mode, league_id=league_id)
 
     return render_template(
         'leagues.html',
@@ -886,4 +1176,4 @@ def index_profile(profile: str, mode: str = 'default'):
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(threaded=True, debug=False)

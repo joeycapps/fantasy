@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Fantasy Commander</title>
+    <title>FantasyCap — The Fantasy Captain</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     <meta http-equiv="refresh" content="60">
 </head>
@@ -11,9 +11,22 @@
 <body>
     <header class="app-header">
         <div>
-            <h1>Fantasy Commander</h1>
+            <h1>FantasyCap</h1>
+            <p class="brand-tagline">The Fantasy Captain</p>
             <p>Week {{ week }} · {{ matchups|length }} matchups</p>
         </div>
+
+        <div class="header-search">
+            <input
+                type="search"
+                id="fantasy-search"
+                placeholder="Search players or teams..."
+                autocomplete="off"
+                oninput="searchFantasy(this.value)"
+            >
+            <div id="fantasy-search-results" class="fantasy-search-results"></div>
+        </div>
+
         <div class="header-actions">
             <a href="?week={{ week - 1 }}">← Previous</a>
             <a href="?week={{ week + 1 }}">Next →</a>
@@ -24,17 +37,25 @@
     <main class="matchups">
         {% for matchup in matchups %}
         <section class="matchup-card">
+
+            <div class="matchup-league">
+                {{ matchup.home.league_name }}
+            </div>
+
             {% for team in matchup.values() %}
                 {% set class = "odd" if loop.index0 % 2 == 1 else "even" %}
 
                 <div class="team {{ class }}">
                     <div class="team-header">
+
                         <div class="team-chance">
                             {{ team.players.win_chance }}
                         </div>
 
-                        <div class="team-name">
-                            {{ team.owner.split()[0]|upper }}
+                        <div class="team-identity">
+                            <div class="team-name">
+                                {{ team.owner.split()[0]|upper }}
+                            </div>
                         </div>
 
                         <div class="team-score">
@@ -42,41 +63,82 @@
                         </div>
 
                         <div class="team-projected">
-                            Projected {{ "%.02f"|format(team.players.projected) }}
+                            {{ "%.02f"|format(team.players.projected) }}
                         </div>
                     </div>
 
-                    <div class="players">
-                        {% for player in team.players.show %}
-                        <div class="player {{ player.play_status }} {{ player.status|lower }}">
-                            <div class="position">
-                                —
-                            </div>
+                    <div class="roster-section">
+                        <div class="roster-label">STARTERS</div>
 
-                            <div class="name">
-                                {% if player.headshot %}
-                                    <img class="player-headshot" src="{{ player.headshot }}" alt="{{ player.name }}">
-                                {% endif %}
-                                {{ player.name }}
-                            </div>
+                        <div class="players">
+                            {% for player in team.players.starters %}
+                            <a class="player {{ player.play_status }} {{ player.status|lower }}" href="#" onclick="event.preventDefault(); openPlayerModal('{{ player.player_id }}')">
+                                <div class="position">
+                                    {{ player.slot }}
+                                </div>
 
-                            <div class="player-projected">
-                                {% if player.projected != -1 %}
-                                    {{ "%.02f"|format(player.projected) }}
-                                {% else %}
-                                    —
-                                {% endif %}
-                            </div>
+                                <div class="name">
+                                    {% if player.headshot %}
+                                        <img class="player-headshot" src="{{ player.headshot }}" alt="{{ player.name }}">
+                                    {% endif %}
+                                    {{ player.name }}
+                                </div>
 
-                            <div class="player-points">
-                                {% if player.points != player.display %}
-                                    {{ player.display }}
-                                {% else %}
-                                    {{ "%.02f"|format(player.points) }}
-                                {% endif %}
-                            </div>
+                                <div class="player-projected">
+                                    {% if player.projected != -1 %}
+                                        {{ "%.02f"|format(player.projected) }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </div>
+
+                                <div class="player-points">
+                                    {% if player.points != player.display %}
+                                        {{ player.display }}
+                                    {% else %}
+                                        {{ "%.02f"|format(player.points) }}
+                                    {% endif %}
+                                </div>
+                            </a>
+                            {% endfor %}
                         </div>
-                        {% endfor %}
+                    </div>
+
+                    <div class="roster-section bench-section">
+                        <div class="roster-label">BENCH</div>
+
+                        <div class="players">
+                            {% for player in team.players.bench %}
+                            <a class="player {{ player.play_status }} {{ player.status|lower }}" href="#" onclick="event.preventDefault(); openPlayerModal('{{ player.player_id }}')">
+                                <div class="position">
+                                    {{ player.position }}
+                                </div>
+
+                                <div class="name">
+                                    {% if player.headshot %}
+                                        <img class="player-headshot" src="{{ player.headshot }}" alt="{{ player.name }}">
+                                    {% endif %}
+                                    {{ player.name }}
+                                </div>
+
+                                <div class="player-projected">
+                                    {% if player.projected != -1 %}
+                                        {{ "%.02f"|format(player.projected) }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </div>
+
+                                <div class="player-points">
+                                    {% if player.points != player.display %}
+                                        {{ player.display }}
+                                    {% else %}
+                                        {{ "%.02f"|format(player.points) }}
+                                    {% endif %}
+                                </div>
+                            </a>
+                            {% endfor %}
+                        </div>
                     </div>
                 </div>
 
@@ -84,8 +146,442 @@
                     <div class="vs">VS</div>
                 {% endif %}
             {% endfor %}
+
         </section>
         {% endfor %}
     </main>
+<div id="player-modal" class="player-modal" aria-hidden="true">
+    <div class="player-modal-backdrop" onclick="closePlayerModal()"></div>
+
+    <div class="player-modal-window" role="dialog" aria-modal="true">
+        <button class="player-modal-close" onclick="closePlayerModal()" aria-label="Close">
+            ×
+        </button>
+
+        <div id="player-modal-content">
+            <div class="player-modal-loading">Loading player...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+
+let fantasySearchTimer = null;
+
+async function searchFantasy(query) {
+    const resultsBox = document.getElementById("fantasy-search-results");
+
+    clearTimeout(fantasySearchTimer);
+
+    query = query.trim();
+
+    if (query.length < 2) {
+        resultsBox.innerHTML = "";
+        resultsBox.classList.remove("open");
+        return;
+    }
+
+    fantasySearchTimer = setTimeout(async () => {
+        try {
+            const response = await fetch(
+                "/api/search?q=" + encodeURIComponent(query)
+            );
+
+            if (!response.ok) {
+                throw new Error("Search failed");
+            }
+
+            const data = await response.json();
+
+            if (!data.results || !data.results.length) {
+                resultsBox.innerHTML =
+                    '<div class="fantasy-search-empty">No results found</div>';
+                resultsBox.classList.add("open");
+                return;
+            }
+
+            resultsBox.innerHTML = data.results.map(result => {
+                if (result.type === "league") {
+                    return `
+                        <button
+                            type="button"
+                            class="fantasy-search-result"
+                            onclick="selectFantasyLeagueResult('${result.id}')"
+                        >
+                            <span class="fantasy-search-result-info">
+                                <strong>${escapeHtml(result.name)}</strong>
+                                <small>${escapeHtml(result.platform)} · ${escapeHtml(String(result.season))}</small>
+                            </span>
+                        </button>
+                    `;
+                }
+
+                return `
+                    <button
+                        type="button"
+                        class="fantasy-search-result"
+                        onclick="selectFantasySearchResult('${result.id}')"
+                    >
+                        <img
+                            src="${result.headshot || ''}"
+                            alt=""
+                            onerror="this.style.display='none'"
+                        >
+                        <span class="fantasy-search-result-info">
+                            <strong>${escapeHtml(result.name)}</strong>
+                            <small>${escapeHtml(result.position || "")} · ${escapeHtml(result.team || "")}</small>
+                        </span>
+                    </button>
+                `;
+            }).join("");
+
+            resultsBox.classList.add("open");
+
+        } catch (error) {
+            resultsBox.innerHTML =
+                '<div class="fantasy-search-empty">Search unavailable</div>';
+            resultsBox.classList.add("open");
+        }
+    }, 200);
+}
+
+function selectFantasyLeagueResult(leagueId) {
+    const input = document.getElementById("fantasy-search");
+    const resultsBox = document.getElementById("fantasy-search-results");
+
+    resultsBox.classList.remove("open");
+    input.value = "";
+
+    window.location.href = "/?league_id=" + encodeURIComponent(leagueId);
+}
+
+
+function selectFantasySearchResult(playerId) {
+    const input = document.getElementById("fantasy-search");
+    const resultsBox = document.getElementById("fantasy-search-results");
+
+    resultsBox.classList.remove("open");
+    input.value = "";
+
+    openPlayerModal(playerId);
+}
+
+document.addEventListener("click", function(event) {
+    const search = document.querySelector(".header-search");
+
+    if (search && !search.contains(event.target)) {
+        const resultsBox = document.getElementById("fantasy-search-results");
+
+        if (resultsBox) {
+            resultsBox.classList.remove("open");
+        }
+    }
+});
+
+async function openPlayerModal(playerId) {
+    const modal = document.getElementById("player-modal");
+    const content = document.getElementById("player-modal-content");
+
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+
+    content.innerHTML = '<div class="player-modal-loading">Loading player...</div>';
+
+    try {
+        const response = await fetch(
+            "/api/player/" +
+            encodeURIComponent(playerId) +
+            "?week={{ week }}&season={{ season or 2026 }}"
+        );
+
+        if (!response.ok) {
+            throw new Error("Player API returned " + response.status);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        renderPlayerModal(data);
+    } catch (error) {
+        console.error(error);
+        content.innerHTML =
+            '<div class="player-modal-error">Unable to load player details.</div>';
+    }
+}
+
+function renderPlayerModal(data) {
+    const p = data.player;
+    const content = document.getElementById("player-modal-content");
+
+    const leagueRows = data.leagues.length
+        ? data.leagues.map(league => `
+            <div class="player-league-row">
+                <div>
+                    <strong>${escapeHtml(league.name)}</strong>
+                    <small>${escapeHtml(league.team)}</small>
+                </div>
+                <span class="${Object.values(league.week_slots || {})[0] === "STARTED" ? "started" : "benched"}">
+                    ${Object.values(league.week_slots || {})[0] || "—"}
+                </span>
+            </div>
+        `).join("")
+        : "<p>Not currently owned in a configured Sleeper league.</p>";
+
+    const gameLogByWeek = Object.fromEntries(
+        (data.game_log || []).map(game => [Number(game.week), game])
+    );
+
+    const seasonSchedule = data.season_schedule || [];
+
+    const gameRows = seasonSchedule.map(game => {
+        const stats = gameLogByWeek[Number(game.week)] || null;
+        const isBye = !game.opponent;
+        const played = !!stats;
+
+        const value = key => {
+            if (!played || isBye) return "—";
+            return formatStat(stats[key] ?? 0);
+        };
+
+        const points = () => {
+            if (!played || isBye) return "—";
+            return formatNumber(stats.points ?? 0);
+        };
+
+        return `
+            <tr class="${isBye ? "bye-row" : ""}">
+                <td>Week ${game.week}</td>
+
+                <td class="game-opponent">
+                    ${
+                        isBye
+                            ? "<strong>BYE</strong>"
+                            : `${game.home ? "vs" : "@"} ${escapeHtml(game.opponent)}`
+                    }
+                </td>
+
+                <td>${points()}</td>
+                <td>${value("pass_yd")}</td>
+                <td>${value("pass_td")}</td>
+                <td>${value("rush_yd")}</td>
+                <td>${value("rush_td")}</td>
+                <td>${value("rec")}</td>
+                <td>${value("rec_yd")}</td>
+                <td>${value("rec_td")}</td>
+                <td>${value("targets")}</td>
+            </tr>
+        `;
+    }).join("");
+
+    const gameTable = `
+        <div class="player-game-table-wrap">
+            <table class="player-game-table">
+                <thead>
+                    <tr>
+                        <th>Week</th>
+                        <th>Opponent</th>
+                        <th>PPR</th>
+                        <th>Pass Yds</th>
+                        <th>Pass TD</th>
+                        <th>Rush Yds</th>
+                        <th>Rush TD</th>
+                        <th>Rec</th>
+                        <th>Rec Yds</th>
+                        <th>Rec TD</th>
+                        <th>Targets</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${
+                        gameRows ||
+                        `<tr>
+                            <td colspan="11">No current-season schedule available.</td>
+                        </tr>`
+                    }
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    content.innerHTML = `
+          <section class="player-profile-header">
+              <div class="player-profile-identity">
+                  <img
+                      class="player-profile-headshot"
+                      src="${escapeHtml(p.headshot)}"
+                      alt="${escapeHtml(p.name)}"
+                  >
+
+                  <div class="player-profile-info">
+                      <h1>${escapeHtml(p.name)}</h1>
+                      <div class="player-profile-meta">
+                          ${escapeHtml(p.position)} · ${escapeHtml(p.team)}
+                      </div>
+                      <div class="player-profile-status">
+                          ${escapeHtml(p.status)}
+                      </div>
+                  </div>
+              </div>
+
+              <div class="player-profile-stats">
+                  <div class="player-profile-stat">
+                      <strong>Owned</strong>
+                      <span>${data.owned_count} leagues</span>
+                  </div>
+
+                  <div class="player-profile-stat">
+                      <strong>Started</strong>
+                      <span>${data.started}</span>
+                  </div>
+
+                  <div class="player-profile-stat">
+                      <strong>Benched</strong>
+                      <span>${data.benched}</span>
+                  </div>
+
+                  <div class="player-profile-stat">
+                      <strong>PPG</strong>
+                      <span>${formatNumber(data.ppg)}</span>
+                  </div>
+
+                  <div class="player-profile-stat">
+                      <strong>Projection</strong>
+                      <span>${formatNumber(data.projection)}</span>
+                  </div>
+
+                  <div class="player-profile-stat">
+                      <strong>Bye Week</strong>
+                      <span>${data.bye_week || "—"}</span>
+                  </div>
+              </div>
+          </section>
+
+        <section>
+            <h2>Leagues</h2>
+            <div class="player-leagues">
+                ${leagueRows}
+            </div>
+        </section>
+
+        <section>
+            <h2>${data.season || "Current Season"} Schedule & Stats</h2>
+            ${gameTable}
+        </section>
+
+          <section class="player-history-section">
+              <h2>Prior Years</h2>
+              <div id="player-prior-years">
+                  <div class="player-history-loading">Loading historical seasons…</div>
+              </div>
+          </section>
+    `;
+
+    // Load historical seasons separately so they never block the fast profile.
+    loadPlayerHistory(data.player.id);
+
+}
+
+function formatNumber(value) {
+    if (value === null || value === undefined || value === "") {
+        return "—";
+    }
+
+    const number = Number(value);
+
+    if (Number.isNaN(number)) {
+        return "—";
+    }
+
+    return number.toFixed(2);
+}
+
+function formatStat(value) {
+    if (value === null || value === undefined) {
+        return "—";
+    }
+
+    return Number(value).toLocaleString();
+}
+
+async function loadPlayerHistory(playerId) {
+    const container = document.getElementById("player-prior-years");
+    if (!container) return;
+
+    try {
+        const response = await fetch(
+            "/api/player/" + encodeURIComponent(playerId) + "/history"
+            + "?season={{ season or 2026 }}"
+        );
+
+        if (!response.ok) {
+            throw new Error("History API returned " + response.status);
+        }
+
+        const historyData = await response.json();
+        const years = historyData.prior_years || [];
+
+        if (!years.length) {
+            container.innerHTML =
+                '<div class="player-history-empty">No historical season data available.</div>';
+            return;
+        }
+
+        container.innerHTML = years.map(year => `
+            <details class="player-prior-year">
+                <summary>
+                    <strong>${year.season}</strong>
+                    <span>${formatNumber(year.ppg)} PPG · ${year.games} games</span>
+                </summary>
+
+                <div class="player-year-stats">
+                    <span>${formatStat(year.pass_yd)} pass yds</span>
+                    <span>${formatStat(year.pass_td)} pass TD</span>
+                    <span>${formatStat(year.pass_int)} INT</span>
+                    <span>${formatStat(year.rush_yd)} rush yds</span>
+                    <span>${formatStat(year.rush_td)} rush TD</span>
+                    <span>${formatStat(year.rec)} rec</span>
+                    <span>${formatStat(year.rec_yd)} rec yds</span>
+                    <span>${formatStat(year.rec_td)} rec TD</span>
+                    <span>${formatStat(year.targets)} targets</span>
+                </div>
+            </details>
+        `).join("");
+
+    } catch (error) {
+        console.error("Player history load failed:", error);
+        container.innerHTML =
+            '<div class="player-history-empty">Unable to load historical data.</div>';
+    }
+}
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+function closePlayerModal() {
+    const modal = document.getElementById("player-modal");
+
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+}
+
+document.addEventListener("keydown", function(event) {
+    if (event.key === "Escape") {
+        closePlayerModal();
+    }
+});
+</script>
+
+
 </body>
 </html>

@@ -1,5 +1,6 @@
 import datetime
 import json
+from pathlib import Path
 import math
 import threading
 import time
@@ -23,34 +24,58 @@ TABLES = {
     'changes': 'commander.changes',
 }
 
+_PROFILES_CACHE = None
+_PROFILES_CACHE_FILE = "profiles_cache.json"
+_PROFILES_CACHE_TTL = 300
+
 
 def initialize_bigquery_client():
-    return bigquery.Client()
+    return bigquery.Client(project="fantasy-commander-505206")
 
 
 def run_query(query: str, as_list: bool = False):
     if not as_list:
-        return bigquery.Client().query(query).result()
+        return bigquery.Client(project="fantasy-commander-505206").query(query).result()
     else:
-        return [row for row in bigquery.Client().query(query).result()]
+        return [row for row in bigquery.Client(project="fantasy-commander-505206").query(query).result()]
 
 
 def write_to_bigquery(table: str, schema: list, rows: list):
 
-    bq = bigquery.Client()
+    bq = bigquery.Client(project="fantasy-commander-505206")
 
     job_config = bigquery.LoadJobConfig(schema=schema, source_format='NEWLINE_DELIMITED_JSON')
     bq.load_table_from_json(rows, table, job_config=job_config).result()
 
 
 def load_profiles() -> dict:
+    global _PROFILES_CACHE
+
+    if _PROFILES_CACHE is not None:
+        return _PROFILES_CACHE
+
+    # Fast persistent cache across Python/application restarts.
+    try:
+        cache_path = Path(_PROFILES_CACHE_FILE)
+
+        if cache_path.exists():
+            age = time.time() - cache_path.stat().st_mtime
+
+            if age < _PROFILES_CACHE_TTL:
+                _PROFILES_CACHE = json.loads(
+                    cache_path.read_text()
+                )
+                return _PROFILES_CACHE
+    except Exception:
+        pass
 
     profiles = {}
-    bq = bigquery.Client()
+    bq = bigquery.Client(project="fantasy-commander-505206")
 
-    for league in [league for league in bq.query(f"SELECT * FROM `{TABLES.get('leagues')}` ORDER BY platform, league_id").result()]:
-
-        if league.profile not in profiles.keys():
+    for league in bq.query(
+        f"SELECT * FROM `{TABLES.get('leagues')}` ORDER BY platform, league_id"
+    ).result():
+        if league.profile not in profiles:
             profiles[league.profile] = []
 
         profiles[league.profile].append({
@@ -63,8 +88,17 @@ def load_profiles() -> dict:
             'swid': league.swid,
             's2': league.s2,
         })
-    
-    return profiles
+
+    _PROFILES_CACHE = profiles
+
+    try:
+        Path(_PROFILES_CACHE_FILE).write_text(
+            json.dumps(profiles)
+        )
+    except Exception:
+        pass
+
+    return _PROFILES_CACHE
 
 
 def initialize_espn_league(league_id: int, year: int) -> League:
@@ -490,11 +524,19 @@ def organize_team(players: list, mode: str = 'default', flex_count = 1) -> dict:
     return team
 
 
-def get_all_matchups(profile_name: str, week: int, mode: str = 'default') -> list:
+def get_all_matchups(profile_name: str, week: int, mode: str = 'default', league_id=None) -> list:
 
     runtime = datetime.datetime.utcnow()
 
     leagues = load_profiles().get(profile_name)
+
+    if league_id:
+        league_id = str(league_id)
+        leagues = [
+            league for league in leagues
+            if str(league.get('league_id')) == league_id
+        ]
+
     matchups = []
 
     if not leagues:
@@ -551,8 +593,8 @@ def get_all_matchups(profile_name: str, week: int, mode: str = 'default') -> lis
 
         league_id = league.get('league_id')
 
-        home = {'id': league.get('team_id'), 'players': []}
-        away = {'id': 0, 'players': []}
+        home = {'id': league.get('team_id'), 'players': [], 'league_name': league.get('name')}
+        away = {'id': 0, 'players': [], 'league_name': league.get('name')}
 
         for matchup in dbs.get('matchups'):
             if matchup.league_id == league_id and matchup.home == home.get('id'):
