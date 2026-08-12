@@ -823,10 +823,15 @@ def update_progress():
 
 def calculate_projected(player: dict, projection: float, progress: float) -> float:
 
-    if progress == None or player.get('play_status') == 'bye':
-        return 0
+    # Pregame players should display their actual projection.
+    # Missing game-progress data is normal before kickoff.
+    if player.get('play_status') == 'bye':
+        return projection
 
     if player.get('play_status') == 'played' or player.get('status') == 'OUT':
         return player.get('points', 0)
-    
+
+    if progress is None:
+        return projection
+
     return projection if progress < 0.25 else (player.get('points', 0) / progress)
